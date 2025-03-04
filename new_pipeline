@@ -1,0 +1,186 @@
+pipeline {
+    agent any
+
+    tools {
+        nodejs 'NodeJS_16'
+    }
+       
+    environment {
+        EC2_IP = credentials('EC2_IP')
+        EC2_USER = credentials('EC2_USER')
+    }
+    
+    stages {
+        // Stage 1: Git Checkout
+        stage('Git Checkout') {
+            steps {
+                git url: "https://github.com/namrqthakaipa/single_react_app.git", branch: "main", credentialsId: "New_React_Token"
+            }
+        }
+
+        // Stage 2: Install NPM Dependencies
+        stage('NPM Install') {
+            steps {
+                sh "npm install | tee npm_install.log"
+            }
+        }
+        
+        // Stage 4: Run Node Build
+        stage('Node Build') {
+            steps {
+                sh "npm run build | tee build.log"
+            }
+        }
+        
+        // Stage 5: Taking Backup of Existing Build
+        stage('Backup Existing Build') {
+            steps {
+                script {
+                    def lastCommit = sh(script: "git rev-parse HEAD", returnStdout: true).trim()
+                    def latestCommit = sh(script: '''git ls-remote origin -h refs/heads/main | awk '{print $1}' ''' , returnStdout: true).trim()
+
+                    if (lastCommit == latestCommit) {
+                        echo "No new changes detected. Skipping backup stage..."
+                        return
+                    }
+
+                    def commitID = sh(script: "git rev-parse --short=2 HEAD", returnStdout: true).trim()
+                    def date = sh(script: "date +%Y%m%d", returnStdout: true).trim()
+                    def backupDir = "/opt/backup/${env.JOB_NAME}_${commitID}_${date}"
+
+                    sh "mkdir -p ${backupDir}"
+                    sh "cp -r /var/lib/jenkins/workspace/React_pipeline/build/* ${backupDir}/"
+                    echo "Backup completed at ${backupDir}"
+                }
+            }
+        }
+        
+        // Stage 5: Install NPM Dependencies and Build
+        stage('Deploy React Build to EC2') {
+            steps {
+                script {
+                    withCredentials([
+                        sshUserPrivateKey(credentialsId: 'EC2_SSH_KEY', keyFileVariable: 'KEY_PATH', usernameVariable: 'EC2_USER'),
+                        string(credentialsId: 'EC2_IP', variable: 'EC2_IP')
+                    ]) {
+                        // Define variables directly in the script
+                        def JENKINS_BUILD_PATH = '/var/lib/jenkins/workspace/React_pipeline/build'
+                        def EC2_TARGET_PATH = '/opt/single_react_app'
+        
+                        // SSH into EC2 and prepare the deployment directory
+                        sh """
+                        ssh -i ${KEY_PATH} -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} '
+                            sudo rm -rf ${EC2_TARGET_PATH}
+                            sudo mkdir -p ${EC2_TARGET_PATH}
+                            sudo chown -R ${EC2_USER}:${EC2_USER} ${EC2_TARGET_PATH}
+                        '
+                        """
+                        
+                        // Copy build files from Jenkins workspace to EC2
+                        sh """
+                        scp -i ${KEY_PATH} -o StrictHostKeyChecking=no -r ${JENKINS_BUILD_PATH}/* ${EC2_USER}@${EC2_IP}:${EC2_TARGET_PATH}/
+                        """
+                        echo "React build files deployed successfully to EC2!"
+                    }
+                }
+            }
+}
+
+        // Stage 5: Configure Nginx
+        stage('Deploy Nginx Config') {
+            steps {
+                script {
+                    withCredentials([sshUserPrivateKey(credentialsId: 'EC2_SSH_KEY', keyFileVariable: 'KEY_PATH')]) {
+                        sh """
+                        ssh -i ${KEY_PATH} -o StrictHostKeyChecking=no -t ${EC2_USER}@${EC2_IP} '
+                        sudo bash -c "echo \\"server {
+                            listen 80;
+                            server_name ${EC2_IP};
+                        }\\" > /etc/nginx/sites-available/default"
+                        sudo systemctl restart nginx
+                        '
+                        """
+                    }
+                }
+            }
+        }
+        
+        }   
+
+}
+
+    // post {
+    //     always {
+    //         script {
+    //             def jobName = env.JOB_NAME
+    //             def buildNumber = env.BUILD_NUMBER
+    //             def pipelineStatus = currentBuild.result ?: 'UNKNOWN'
+    //             def bannerColor = pipelineStatus.toUpperCase() == 'SUCCESS' ? 'green' : 'red'
+
+    //             Collect environment information
+    //             def environmentInfo = """<b>Environment Details:</b><br>
+                                        
+    //                                       <b>Operating System:</b> ${osDetails}<br>
+    //                                       <b>Workspace:</b> ${env.WORKSPACE}<br>
+    //                                       <b>Node Version:</b> ${sh(script: 'node -v', returnStdout: true).trim()}<br>
+    //                                       <b>Agent Name:</b> ${env.NODE_NAME}<br>
+    //                                       <b>Build User:</b> ${env.BUILD_USER_ID ?: 'N/A'}<br>
+    //                                       <b>Build URL:</b> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a><br>
+    //                                       <b>Jenkins URL:</b> ${env.JENKINS_URL}<br>
+    //                                       <b>Git Commit ID:</b> ${sh(script: 'git rev-parse HEAD', returnStdout: true).trim()}<br>
+    //                                       <b>Build Timestamp:</b> ${new Date().format('yyyy-MM-dd HH:mm:ss')}<br><br>"""
+
+    //             Collect job timing information
+    //             def startTime = new Date(currentBuild.startTimeInMillis)
+    //             def endTime = new Date(currentBuild.startTimeInMillis + currentBuild.duration)
+    //             def durationMillis = currentBuild.duration
+    //             def durationFormatted = formatDuration(durationMillis)
+
+    //             Add job timing details
+    //             def timingInfo = """<b>Job Timing:</b><br>
+    //                                 <b>Start Time:</b> ${startTime.format('yyyy-MM-dd HH:mm:ss')}<br>
+    //                                 <b>End Time:</b> ${endTime.format('yyyy-MM-dd HH:mm:ss')}<br>
+    //                                 <b>Duration:</b> ${durationFormatted}<br><br>"""
+
+    //             Capture the console output logs
+    //             def npmInstallLogs = readFile('npm_install.log')
+    //             def buildLogs = readFile('build.log')
+
+    //             Build email body with console output and other information
+    //             def body = """<html>
+    //                             <body>
+    //                             <div style="border: 4px solid ${bannerColor}; padding: 10px;">
+    //                             <h2>${jobName} - Build ${buildNumber}</h2>
+    //                             <div style="background-color: ${bannerColor}; padding: 10px;">
+    //                             <h3 style="color: white;">Pipeline Status: ${pipelineStatus.toUpperCase()}</h3>
+    //                             </div>
+    //                             <p><b>Environment Information:</b></p>
+    //                             <p>${environmentInfo}</p>
+    //                             <p><b>Job Timing:</b></p>
+    //                             <p>${timingInfo}</p>
+    //                             <p><b>Console Output:</b></p>
+    //                             <pre>${npmInstallLogs}</pre>
+    //                             <pre>${buildLogs}</pre>
+    //                             </div>
+    //                             </body>
+    //                             </html>"""
+
+    //             emailext (
+    //                 subject: "${jobName} - Build ${buildNumber} - ${pipelineStatus.toUpperCase()}",
+    //                 body: body,
+    //                 to: 'namrathakaipa@gmail.com',
+    //                 from: 'kaipanamratha@gmail.com',
+    //                 replyTo: 'jenkins@example.com',
+    //                 mimeType: 'text/html'
+    //             )
+    //         }
+    //     }
+    
+
+
+// def formatDuration(long millis) {
+//     long hours = millis / (1000 * 60 * 60)
+//     long minutes = (millis % (1000 * 60 * 60)) / (1000 * 60)
+//     long seconds = (millis % (1000 * 60)) / 1000
+//     return "${hours}h ${minutes}m ${seconds}s"
+// }
