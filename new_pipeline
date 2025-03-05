@@ -87,26 +87,124 @@ pipeline {
 }
 
         // Stage 5: Configure Nginx
-        stage('Deploy Nginx Config') {
-            steps {
-                script {
-                    withCredentials([sshUserPrivateKey(credentialsId: 'EC2_SSH_KEY', keyFileVariable: 'KEY_PATH')]) {
-                        sh """
-                        ssh -i ${KEY_PATH} -o StrictHostKeyChecking=no -t ${EC2_USER}@${EC2_IP} '
-                        sudo bash -c "echo \\"server {
-                            listen 80;
-                            server_name ${EC2_IP};
-                        }\\" > /etc/nginx/sites-available/default"
-                        sudo systemctl restart nginx
-                        '
-                        """
-                    }
-                }
-            }
-        }
-        
-        }   
+       stage('Configure Nginx') {
+            // steps {
+            //     script {
+            //         def ec2_ip = 'ec2-13-235-67-19.ap-south-1.compute.amazonaws.com'
+            //         def ec2_user = 'ubuntu'
+            //         def key_path = '/var/lib/jenkins/Asia_key.pem'
 
+            //         sh """
+            //       ssh -i ${key_path} -o StrictHostKeyChecking=no -t ${ec2_user}@${ec2_ip} '
+            //         echo "server {
+            //             listen 80;
+            //             server_name 65.1.110.154;
+                        
+            //             root /opt/single_react_app;
+            //             index index.html;
+                        
+            //             location / {
+            //                 try_files \\\\\\\$uri /index.html;
+            //             }
+                        
+            //             error_page  404 /404.html;
+            //             location = /40x.html {
+            //                 root /usr/share/nginx/html;
+            //             }
+            //         }" | sudo tee /etc/nginx/sites-available/single_react_app.conf > /dev/null
+                
+            //         sudo rm -f /etc/nginx/sites-enabled/single_react_app.conf
+            //         sudo ln -s /etc/nginx/sites-available/single_react_app.conf /etc/nginx/sites-enabled/
+                    
+            //         sudo nginx -t
+            //         sudo systemctl restart nginx
+            //         sudo systemctl status nginx
+            //         '
+            //         """
+            //     }
+            // }
+               steps {
+                    //script {
+                    //     def key_path = '/var/lib/jenkins/Asia_key.pem'
+
+                    //     sh """
+                    //     ssh -i ${key_path} -o StrictHostKeyChecking=no -t ${EC2_USER}@${EC2_IP} '
+                    //         if [ -f /etc/nginx/sites-available/single_react_app.conf ]; then
+                    //             sudo rm -f /etc/nginx/sites-available/single_react_app.conf
+                    //             sudo rm -f /etc/nginx/sites-enabled/single_react_app.conf
+                    //         fi
+            
+                    //         sudo bash -c "echo \"server {
+                    //                 listen 80;
+                    //                 server_name ${EC2_IP};
+                                    
+                    //                 root /opt/single_react_app;
+                    //                 index index.html;
+                                    
+                    //                 location / {
+                    //                     try_files \\\\\\\$uri /index.html;
+                    //                 }
+                                    
+                    //                 error_page  404 /404.html;
+                    //                 location = /404.html {
+                    //                     root /usr/share/nginx/html;
+                    //                 }
+                    //             }\" > /etc/nginx/sites-available/single_react_app.conf"
+
+            
+                    //         sudo ln -s /etc/nginx/sites-available/single_react_app.conf /etc/nginx/sites-enabled/
+                            
+                    //         sudo nginx -t
+                    //         sudo systemctl restart nginx
+                    //         sudo systemctl status nginx
+                    //     '
+                    //     """
+                    // }
+                    script {
+    def key_path = '/var/lib/jenkins/Asia_key.pem'
+
+    sh """
+    ssh -i ${key_path} -o StrictHostKeyChecking=no -t ${EC2_USER}@${EC2_IP} '
+        if [ -f /etc/nginx/sites-available/single_react_app.conf ]; then
+            sudo rm -f /etc/nginx/sites-available/single_react_app.conf
+            sudo rm -f /etc/nginx/sites-enabled/single_react_app.conf
+        fi
+
+        sudo bash -c "echo \\"server {
+            listen 80;
+            server_name ${EC2_IP};
+
+            root /opt/single_react_app;
+            index index.html;
+
+            location / {
+                try_files \\\\\\\$uri /index.html;
+            }
+
+            error_page 404 /404.html;
+            location = /404.html {
+                root /usr/share/nginx/html;
+            }
+        }\\" > /etc/nginx/sites-available/single_react_app.conf"
+        
+
+        sudo ln -s /etc/nginx/sites-available/single_react_app.conf /etc/nginx/sites-enabled/
+
+        sudo nginx -t
+        sudo systemctl restart nginx
+        sudo systemctl status nginx
+    '
+    """
+}
+
+            }
+
+        } 
+        
+        
+        
+        
+    }   
 }
 
     // post {
@@ -175,6 +273,7 @@ pipeline {
     //             )
     //         }
     //     }
+    //}
     
 
 
