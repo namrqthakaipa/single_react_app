@@ -8,54 +8,89 @@ pipeline {
     environment {
         EC2_IP = credentials('EC2_IP')
         EC2_USER = credentials('EC2_USER')
+        EPO_URL = "https://github.com/namrqthakaipa/single_react_app.git"
+        REPO_DIR = "/var/lib/jenkins/workspace/React_pipeline"
+        BACKUP_DIR = "/opt/backup"
+        BRANCH = "main"
+        GIT_CREDENTIALS = "New_React_Token"
     }
     
     stages {
         // Stage 1: Git Checkout
-        stage('Git Checkout') {
-            steps {
-                git url: "https://github.com/namrqthakaipa/single_react_app.git", branch: "main", credentialsId: "New_React_Token"
-            }
-        }
-
-        // Stage 2: Install NPM Dependencies
-        stage('NPM Install') {
-            steps {
-                sh "npm install | tee npm_install.log"
-            }
-        }
-        
-        // Stage 4: Run Node Build
-        stage('Node Build') {
-            steps {
-                sh "npm run build | tee build.log"
-            }
-        }
-        
-        // Stage 5: Taking Backup of Existing Build
-        stage('Backup Existing Build') {
+         stage('Check Repository') {
             steps {
                 script {
-                    def lastCommit = sh(script: "git rev-parse HEAD", returnStdout: true).trim()
-                    def latestCommit = sh(script: '''git ls-remote origin -h refs/heads/main | awk '{print $1}' ''' , returnStdout: true).trim()
-
-                    if (lastCommit == latestCommit) {
-                        echo "No new changes detected. Skipping backup stage..."
-                        return
+                    if (!fileExists("${REPO_DIR}/.git")) {
+                        echo "Repository not found. Cloning..."
+                        sh "git clone ${REPO_URL} ${REPO_DIR}"
+                    } else {
+                        echo "Repository already exists. Checking for updates..."
+                        sh "cd ${REPO_DIR} && git remote update"
                     }
-
-                    def commitID = sh(script: "git rev-parse --short=2 HEAD", returnStdout: true).trim()
-                    def date = sh(script: "date +%Y%m%d", returnStdout: true).trim()
-                    def backupDir = "/opt/backup/${env.JOB_NAME}_${commitID}_${date}"
-
-                    sh "mkdir -p ${backupDir}"
-                    sh "cp -r /var/lib/jenkins/workspace/React_pipeline/build/* ${backupDir}/"
-                    echo "Backup completed at ${backupDir}"
                 }
             }
         }
         
-        // Stage 5: Install NPM Dependencies and Build
+        // Stage 2: Check for New Commits, Backup, and Pull Latest Changes
+            stage('Check & Backup if New Commits Exist') {
+                steps {
+                    script {
+                        def latestRemoteCommit = sh(script: "cd ${REPO_DIR} && git ls-remote origin -h refs/heads/${BRANCH} | awk '{print \$1}'", returnStdout: true).trim()
+                        def currentLocalCommit = sh(script: "cd ${REPO_DIR} && git rev-parse HEAD", returnStdout: true).trim()
+            
+                        echo "Current Local Commit: ${currentLocalCommit}"
+                        echo "Latest Remote Commit: ${latestRemoteCommit}"
+            
+                        if (currentLocalCommit == latestRemoteCommit) {
+                            echo "No new changes found. Skipping backup and pull."
+                           return
+                        }
+            
+                        // New commit detected, take a backup
+                        def commitID = sh(script: "cd ${REPO_DIR} && git rev-parse --short=7 HEAD", returnStdout: true).trim()
+                        def date = sh(script: "date +%Y%m%d", returnStdout: true).trim()
+                        def backupPath = "${BACKUP_DIR}/${env.JOB_NAME}_${commitID}_${date}"
+            
+                        echo "New changes detected. Taking backup before pulling new changes."
+                        echo "Backup Directory: ${backupPath}"
+            
+                        sh "mkdir -p ${backupPath}"
+                        sh "cp -r ${REPO_DIR}/build/* ${backupPath}/"
+                        echo "Backup completed successfully."
+            
+                        // Pull the latest changes
+                        echo "Pulling latest changes from remote repository..."
+                        sh "cd ${REPO_DIR} && git pull origin ${BRANCH}"
+                        echo "Latest changes pulled successfully."
+                    }
+                }
+            }
+
+        
+        // Stage 4: Install NPM Dependencies
+         stage('NPM Install') {
+            steps {
+                script {
+                    echo "Installing dependencies..."
+                    sh "cd ${REPO_DIR} && npm install | tee npm_install.log"
+                }
+            }
+        }
+        
+      
+        
+        // Stage 5: Run Node Build
+        stage('Node Build') {
+            steps {
+                script {
+                    echo "Building React project..."
+                    sh "cd ${REPO_DIR} && npm run build | tee build.log"
+                }
+            }
+        }
+       
+     
+        // Stage 6: Install NPM Dependencies and Build
         stage('Deploy React Build to EC2') {
             steps {
                 script {
